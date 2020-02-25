@@ -90,6 +90,76 @@ class MemoryWriterIO(addressBits: Int, dataBits: Int) extends Bundle {
     override def cloneType: MemoryWriterIO.this.type = new MemoryWriterIO(addressBits, dataBits).asInstanceOf[this.type]
 }
 
+class RomReader(addressBits: Int, dataBits: Int, values: Seq[UInt], addressOffset: BigInt) extends Module {
+    val io = IO(new Bundle{
+        val reader = Flipped(new MemoryReaderIO(addressBits, dataBits))
+    })
+
+    val rom = VecInit(values)
+    val maskedAddressBits = log2Ceil(dataBits/8)
+    
+    
+    val response = RegInit(false.B)
+    io.reader.response := response
+    val data = RegInit(0.U(dataBits.W))
+    io.reader.data := data
+
+    val index = WireInit((io.reader.address - addressOffset.U)(addressBits-1, maskedAddressBits))
+    val validIndex = WireInit(addressOffset.U <= io.reader.address && io.reader.address < (addressOffset + rom.length*(dataBits/8)).U)
+
+    response := false.B
+    when(io.reader.request) {
+        when( validIndex ) {
+            data := rom(index)
+            response := true.B
+        }
+    }
+}
+
+class RamReaderWriter(addressBits: Int, dataBits: Int, addressOffset: BigInt, size: Int) extends Module {
+    val io = IO(new Bundle {
+        val reader = Flipped(new MemoryReaderIO(addressBits, dataBits))
+        val writer = Flipped(new MemoryWriterIO(addressBits, dataBits))
+    })
+    val dataBytes = dataBits / 8
+    val maskedAddressBits = log2Ceil(dataBytes)
+    val numberOfElements = size >> maskedAddressBits
+    val mem = SyncReadMem(numberOfElements, Vec(dataBytes, UInt(8.W)))
+
+    def checkRange(address: UInt): Bool = {
+        addressOffset.U <= address && address < (addressOffset + size).U
+    }
+
+    val readIndex = WireInit(io.reader.address(addressBits - 1, maskedAddressBits))
+    val isReadIndexValid = WireInit(checkRange(io.writer.address))
+
+    val writeIndex = WireInit(io.writer.address(addressBits - 1, maskedAddressBits))
+    val isWriteIndexValid = WireInit(checkRange(io.writer.address))
+
+    val writeData = WireInit(VecInit((0 until dataBytes by 1).map(i => io.writer.data((i+1)*8-1, i*8))))
+    val writeStrobes = io.writer.strobe.asBools()
+    io.writer.ready := !reset.asBool()
+    when(io.writer.request && isWriteIndexValid) {
+        val port = mem(writeIndex)
+        for(i <- 0 until dataBytes by 1) {
+            when(writeStrobes(i)) {
+                port(i) := writeData(i)
+            }
+        }
+    }
+
+    val readData = RegInit(0.U(dataBits))
+    val readResponse = RegInit(false.B)
+    io.reader.data := readData
+    io.reader.response := readResponse
+    
+    readResponse := false.B
+    when(io.reader.request && isReadIndexValid) {
+        val port = mem(readIndex)
+        readData := Cat(port)
+        readResponse := true.B
+    }
+}
 
 class AXI4MemoryReader(addressBits: Int, dataBits: Int) extends Module {
     val axi4liteParams = AXI4LiteParams(addressBits, dataBits, AXI4LiteReadOnly)
