@@ -14,7 +14,7 @@ class FugaRVTestSystem(programPath: String) extends Module {
       val passed = Output(Bool())
     })
 
-    val rv = Module(new FugaRV)
+    val rv = Module(new FugaRV(0))
     io.dbg <> rv.io.dbg
 
     var programData = mutable.ArrayBuffer.empty[UInt]
@@ -35,12 +35,12 @@ class FugaRVTestSystem(programPath: String) extends Module {
     rv.io.memReader <> dataMem.io.reader
     rv.io.memWriter <> dataMem.io.writer
 
+    val maxPc = programData.size * 4
     val failInst = 0x00119193.U // sli TEST_NUM, TEST_NUM, 1
     val testStarted = WireInit(rv.io.dbg.regs(3) >= 2.U)
     val failed = RegInit(false.B)
-    when(testStarted && rv.io.dbg.inst === failInst) {
+    when(testStarted && (rv.io.dbg.inst === failInst)) {
       failed := true.B
     }
-
     io.passed := rv.io.dbg.regs(3) === 1.U && !failed
 }

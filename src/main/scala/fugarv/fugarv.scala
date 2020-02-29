@@ -3,6 +3,7 @@ package fugarv
 import chisel3._
 import chisel3.util._
 import axi._
+import chisel3.internal.firrtl.Width
 
 object Opcodes {
     val load    = "b0000011".U
@@ -41,10 +42,16 @@ object Opcodes {
 class FugaRVDebugIO extends Bundle {
     val pc = Output(UInt(32.W))
     val state = Output(UInt(4.W))
+    val result = Output(UInt(32.W))
+    val rs1 = Output(UInt(5.W))
+    val rs2 = Output(UInt(5.W))
+    val rd  = Output(UInt(5.W))
+    val regRs1 = Output(UInt(32.W))
+    val regRs2 = Output(UInt(32.W))
     val inst = Output(UInt(32.W))
     val regs = Output(Vec(32, UInt(32.W)))
 }
-class FugaRV extends Module {
+class FugaRV(resetAddress: BigInt = 0x200) extends Module {
     val io = IO(new Bundle {
         val instReader = new MemoryReaderIO(32, 32)
         val memReader = new MemoryReaderIO(32, 32)
@@ -75,7 +82,7 @@ class FugaRV extends Module {
     val sFetch :: sDecode :: sExecute :: sMemAccess :: sWriteBack :: Nil = Enum(5)
     val state = RegInit(sFetch)
 
-    val pc = RegInit(0x200.U(32.W))
+    val pc = RegInit(resetAddress.U(32.W))
     val instRequest = RegInit(true.B)
     io.instReader.address := pc
     io.instReader.request := state === sFetch && instRequest
@@ -101,9 +108,13 @@ class FugaRV extends Module {
     def csrRead(csr: UInt): UInt = MuxCase(0.U, Seq(
         (csr === 0xc00.U) -> cycleCounter,
         (csr === 0xc01.U) -> cycleCounter,
+        (csr === 0xf14.U) -> 0.U,   // mhartid
     ))
     def csrWrite(csr: UInt, value: UInt): Unit = {
         // Nothing to do
+    }
+    def signExtend(value: UInt, w: Width) = {
+        Fill(32 - w.get, value(w.get - 1)) ## value
     }
 
     when(state =/= sFetch) {
@@ -134,10 +145,10 @@ class FugaRV extends Module {
                     switch(funct3)  {
                         is("b000".U) { result := (regRs1.asSInt + immI.asSInt).asUInt } // addi
                         is("b010".U) { result := Mux(regRs1.asSInt < immI.asSInt, 1.U, 0.U) } // slti
-                        is("b011".U) { result := Mux(regRs1 < immI, 1.U, 0.U) } // sltiu
-                        is("b100".U) { result := regRs1 ^ immI } // xori
-                        is("b110".U) { result := regRs1 | immI } // ori
-                        is("b111".U) { result := regRs1 & immI } // andi
+                        is("b011".U) { result := Mux(regRs1 < signExtend(immI, 12.W), 1.U, 0.U) } // sltiu
+                        is("b100".U) { result := regRs1 ^ signExtend(immI, 12.W) } // xori
+                        is("b110".U) { result := regRs1 | signExtend(immI, 12.W) } // ori
+                        is("b111".U) { result := regRs1 & signExtend(immI, 12.W) } // andi
                         
                         is("b001".U) { result := regRs1 << shamt } // slli
                         is("b101".U) { result := Mux(arithmetic, (regRs1.asSInt >> shamt).asUInt, regRs1 >> shamt) } // srai, srli
@@ -176,7 +187,7 @@ class FugaRV extends Module {
                 is(Opcodes.branch) {
                     val condition = MuxCase(false.B, Seq(
                         (funct3 === "b000".U) -> (regRs1 === regRs2),               // beq
-                        (funct3 === "b001".U) -> (regRs1 =/= regRs2),               // bnz
+                        (funct3 === "b001".U) -> (regRs1 =/= regRs2),               // bne
                         (funct3 === "b100".U) -> (regRs1.asSInt < regRs2.asSInt),   // blt
                         (funct3 === "b110".U) -> (regRs1 < regRs2),                 // bltu
                         (funct3 === "b101".U) -> (regRs1.asSInt >= regRs2.asSInt),  // bge
@@ -240,7 +251,7 @@ class FugaRV extends Module {
         is(sWriteBack) {
             state := sFetch
             pc := pc + 4.U
-            when(loadReg) {
+            when(loadReg && rd > 0.U) {
                 regs(rd) := result
             }
             switch(opcode) {
@@ -248,7 +259,7 @@ class FugaRV extends Module {
                     pc := (pc.asSInt + jalOffset.asSInt).asUInt
                 }
                 is(Opcodes.jalr) {
-                    pc := (rs1.asSInt + immI.asSInt).asUInt & ~1.U(32.W)
+                    pc := (regRs1.asSInt + immI.asSInt).asUInt & ~1.U(32.W)
                 }
                 is(Opcodes.branch) {
                     when(result(0)) {
@@ -276,5 +287,11 @@ class FugaRV extends Module {
     io.dbg.pc := pc
     io.dbg.state := state
     io.dbg.inst := inst
+    io.dbg.result := result
+    io.dbg.rs1 := rs1
+    io.dbg.rs2 := rs2
+    io.dbg.rd := rd
+    io.dbg.regRs1 := regRs1
+    io.dbg.regRs2 := regRs2
     io.dbg.regs := regs
 }
