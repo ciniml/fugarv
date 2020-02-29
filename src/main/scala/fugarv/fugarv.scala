@@ -196,13 +196,13 @@ class FugaRV(resetAddress: BigInt = 0x200) extends Module {
                     result := Mux(condition, 1.U, 0.U)
                 }
                 is(Opcodes.load) {
-                    result := (regRs1.asSInt + immI.asSInt).asUInt & ~3.U(32.W)
+                    result := (regRs1.asSInt + immI.asSInt).asUInt
                     readRequest := true.B
                     loadReg := true.B
                     state := sMemAccess
                 }
                 is(Opcodes.store) {
-                    result := (regRs1.asSInt + storeOffset.asSInt).asUInt & ~3.U(32.W)
+                    result := (regRs1.asSInt + storeOffset.asSInt).asUInt
                     writeRequest := true.B
                     state := sMemAccess
                     writeStrobe := MuxCase("b1111".U, Seq(
@@ -231,8 +231,8 @@ class FugaRV(resetAddress: BigInt = 0x200) extends Module {
                     readRequest := false.B
                     when(io.memReader.response) {
                         switch(funct3) {
-                            is("b000".U) { result := io.memReader.data(7,0).asSInt.asUInt }
-                            is("b001".U) { result := io.memReader.data(15,0).asSInt.asUInt }
+                            is("b000".U) { result := signExtend(io.memReader.data(7,0), 8.W) }
+                            is("b001".U) { result := signExtend(io.memReader.data(15,0), 16.W) }
                             is("b010".U) { result := io.memReader.data }
                             is("b100".U) { result := 0.U(24.W) ## io.memReader.data(7,0)}
                             is("b101".U) { result := 0.U(16.W) ## io.memReader.data(15,0) }

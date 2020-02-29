@@ -51,7 +51,7 @@ class FugaRVTester extends ChiselFlatSpec {
         //("rv32ui-p-slli", 5000, -1),
         //("rv32ui-p-slt", 5000, -1),
         //("rv32ui-p-slti", 5000, -1),
-        ("rv32ui-p-sltiu", 5000, -1),
+        //("rv32ui-p-sltiu", 5000, -1),
         //("rv32ui-p-sltu", 5000, -1),
         //("rv32ui-p-sra", 5000, -1),
         //("rv32ui-p-srai", 5000, -1),

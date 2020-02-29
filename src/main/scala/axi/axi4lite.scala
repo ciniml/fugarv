@@ -167,6 +167,8 @@ class AXI4MemoryReader(addressBits: Int, dataBits: Int) extends Module {
         val axi4lite = new AXI4LiteIO(axi4liteParams)
         val reader = Flipped(new MemoryReaderIO(addressBits, dataBits))
     })
+    val dataBytes = dataBits / 8
+    val maskedAddressBits = log2Ceil(dataBytes)
 
     val sIdle :: sAddress :: sData :: Nil = Enum(3)
     val state = RegInit(sIdle)
@@ -174,9 +176,10 @@ class AXI4MemoryReader(addressBits: Int, dataBits: Int) extends Module {
     val address = RegInit(0.U(addressBits.W))
     val data = RegInit(0.U(dataBits.W))
     val response = RegInit(false.B)
+    val byteSelector = WireInit(address(maskedAddressBits-1, 0))
 
     io.axi4lite.ar.get.arvalid := state === sAddress
-    io.axi4lite.ar.get.araddr := address
+    io.axi4lite.ar.get.araddr := address(addressBits-1, maskedAddressBits) ## 0.U(maskedAddressBits.W)
     io.axi4lite.r.get.rready := state === sData
     io.reader.response := response
     io.reader.data := data
@@ -196,7 +199,11 @@ class AXI4MemoryReader(addressBits: Int, dataBits: Int) extends Module {
         }
         is(sData) {
             when(io.axi4lite.r.get.rvalid) {
-                data := io.axi4lite.r.get.rdata
+                for(byteIndex <- 0 until dataBytes) {
+                    when(byteSelector === byteIndex.U) {
+                        data := io.axi4lite.r.get.rdata(dataBytes*8-1, byteIndex*8)
+                    }
+                }
                 response := true.B
 
                 when(io.reader.request) {
